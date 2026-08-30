@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>→.md</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/turndown/7.1.2/turndown.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  :root{
+    --bg:#0d1117;
+    --panel:#11161d;
+    --line:#232b36;
+    --text:#d8e0ea;
+    --dim:#6b7683;
+    --accent:#7ee787;
+    --accent-dim:#2e4a33;
+    --err:#ff7b72;
+    --mono: 'SF Mono', 'Consolas', 'Menlo', monospace;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--mono);
+    padding:28px 20px 60px;
+    min-height:100vh;
+  }
+  .wrap{max-width:640px;margin:0 auto;}
+
+  .prompt{
+    color:var(--dim);
+    font-size:13px;
+    margin-bottom:4px;
+    letter-spacing:0.02em;
+  }
+  .prompt .arrow{color:var(--accent);}
+  h1{
+    font-size:19px;
+    font-weight:600;
+    margin:0 0 4px;
+    letter-spacing:-0.01em;
+  }
+  .sub{
+    color:var(--dim);
+    font-size:13px;
+    margin:0 0 26px;
+    line-height:1.5;
+  }
+
+  .drop{
+    border:1px dashed var(--line);
+    border-radius:6px;
+    padding:40px 20px;
+    text-align:center;
+    cursor:pointer;
+    transition:border-color .15s, background .15s;
+    background:var(--panel);
+  }
+  .drop.drag{
+    border-color:var(--accent);
+    background:var(--accent-dim);
+  }
+  .drop-icon{
+    font-size:22px;
+    color:var(--dim);
+    margin-bottom:10px;
+  }
+  .drop-text{font-size:14px;color:var(--text);}
+  .drop-sub{font-size:12px;color:var(--dim);margin-top:6px;}
+  input[type=file]{display:none;}
+
+  .queue{margin-top:22px;display:flex;flex-direction:column;gap:1px;}
+  .row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    background:var(--panel);
+    border:1px solid var(--line);
+    padding:10px 12px;
+    font-size:13px;
+    border-radius:4px;
+  }
+  .row + .row{margin-top:6px;}
+  .row .name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .row .status{font-size:11px;color:var(--dim);flex-shrink:0;min-width:64px;text-align:right;}
+  .row.done .status{color:var(--accent);}
+  .row.error .status{color:var(--err);}
+  .row .dot{
+    width:6px;height:6px;border-radius:50%;
+    background:var(--dim);flex-shrink:0;
+  }
+  .row.done .dot{background:var(--accent);}
+  .row.error .dot{background:var(--err);}
+  .row.busy .dot{background:#e3b341;animation:pulse 1s infinite;}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+  .actions{
+    margin-top:20px;
+    display:flex;
+    gap:10px;
+    align-items:center;
+  }
+  button{
+    font-family:var(--mono);
+    font-size:13px;
+    background:var(--accent);
+    color:#0d1117;
+    border:none;
+    padding:10px 16px;
+    border-radius:4px;
+    cursor:pointer;
+    font-weight:600;
+  }
+  button:disabled{
+    background:var(--line);
+    color:var(--dim);
+    cursor:not-allowed;
+  }
+  button.ghost{
+    background:transparent;
+    border:1px solid var(--line);
+    color:var(--dim);
+    font-weight:400;
+  }
+  .note{
+    font-size:12px;
+    color:var(--dim);
+    margin-top:16px;
+    line-height:1.6;
+    border-top:1px solid var(--line);
+    padding-top:16px;
+  }
+  .note b{color:var(--text);font-weight:600;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="prompt"><span class="arrow">&gt;</span> file-to-md --watch</div>
+  <h1>drop files, get .md</h1>
+  <p class="sub">.txt, code files, .docx, .pptx, and .pdf go in — clean markdown files come out, saved straight to your downloads.</p>
+
+  <div class="drop" id="drop">
+    <div class="drop-icon">⇩</div>
+    <div class="drop-text">drag files here, or click to browse</div>
+    <div class="drop-sub">multiple files at once is fine</div>
+    <input type="file" id="fileInput" multiple>
+  </div>
+
+  <div class="queue" id="queue"></div>
+
+  <div class="actions" id="actions" style="display:none;">
+    <button id="downloadAllBtn">download all as .md</button>
+    <button class="ghost" id="clearBtn">clear</button>
+  </div>
+
+  <div class="note">
+    <b>how it works:</b> everything happens locally in your browser — nothing is uploaded anywhere.
+    text/code files are wrapped as-is (code gets a fenced block). .docx is converted to real markdown formatting.
+    .pptx pulls out each slide's title, bullet points, and any pictures (embedded directly in the markdown).
+    .pdf has its text extracted (layout/formatting is lost, pdfs are messy that way).
+    each file downloads with the same name and a .md extension.
+  </div>
+</div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const turndownService = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced' });
+
+const CODE_EXT = new Set(['js','jsx','ts','tsx','py','java','c','cpp','h','hpp','cs','go','rs','rb','php','swift','kt','sh','bash','sql','html','css','json','yaml','yml','xml','toml','ini','r','m','pl','lua','scala','dart']);
+const TEXT_EXT = new Set(['txt','md','csv','log']);
+
+let queue = []; // {file, status, mdBlob, mdName}
+
+const dropEl = document.getElementById('drop');
+const inputEl = document.getElementById('fileInput');
+const queueEl = document.getElementById('queue');
+const actionsEl = document.getElementById('actions');
+const downloadAllBtn = document.getElementById('downloadAllBtn');
+const clearBtn = document.getElementById('clearBtn');
+
+dropEl.addEventListener('click', () => inputEl.click());
+inputEl.addEventListener('change', e => handleFiles(e.target.files));
+
+['dragenter','dragover'].forEach(evt =>
+  dropEl.addEventListener(evt, e => { e.preventDefault(); dropEl.classList.add('drag'); })
+);
+['dragleave','drop'].forEach(evt =>
+  dropEl.addEventListener(evt, e => { e.preventDefault(); dropEl.classList.remove('drag'); })
+);
+dropEl.addEventListener('drop', e => handleFiles(e.dataTransfer.files));
+
+function handleFiles(fileList){
+  const files = Array.from(fileList);
+  files.forEach(file => {
+    const entry = { file, status: 'pending', mdBlob: null, mdName: null };
+    queue.push(entry);
+    processFile(entry);
+  });
+  render();
+}
+
+function extOf(name){
+  const parts = name.split('.');
+  return parts.length > 1 ? parts.pop().toLowerCase() : '';
+}
+
+function baseName(name){
+  const idx = name.lastIndexOf('.');
+  return idx === -1 ? name : name.slice(0, idx);
+}
+
+async function processFile(entry){
+  entry.status = 'busy';
+  render();
+  try {
+    const ext = extOf(entry.file.name);
+    let md = '';
+
+    if (ext === 'docx') {
+      const arrayBuffer = await entry.file.arrayBuffer();
+      const result = await mammoth.convertToHtml({ arrayBuffer });
+      md = turndownService.turndown(result.value);
+    } else if (ext === 'pdf') {
+      md = await pdfToMarkdown(entry.file);
+    } else if (ext === 'pptx') {
+      md = await pptxToMarkdown(entry.file);
+    } else if (CODE_EXT.has(ext)) {
+      const text = await entry.file.text();
+      md = '```' + ext + '\n' + text + '\n```\n';
+    } else if (TEXT_EXT.has(ext) || ext === '') {
+      md = await entry.file.text();
+    } else {
+      // unknown binary type - try reading as text, fall back to error
+      const text = await entry.file.text();
+      md = text;
+    }
+
+    entry.mdBlob = new Blob([md], { type: 'text/markdown' });
+    entry.mdName = baseName(entry.file.name) + '.md';
+    entry.status = 'done';
+  } catch (err) {
+    console.error(err);
+    entry.status = 'error';
+  }
+  render();
+}
+
+async function pdfToMarkdown(file){
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  let out = [];
+  for (let i = 1; i <= pdf.numPages; i++){
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const text = content.items.map(it => it.str).join(' ');
+    out.push(`## Page ${i}\n\n${text}\n`);
+  }
+  return out.join('\n');
+}
+
+async function pptxToMarkdown(file){
+  const arrayBuffer = await file.arrayBuffer();
+  const zip = await JSZip.loadAsync(arrayBuffer);
+  const parser = new DOMParser();
+
+  const slideFiles = Object.keys(zip.files)
+    .filter(name => /^ppt\/slides\/slide\d+\.xml$/.test(name))
+    .sort((a, b) => {
+      const na = parseInt(a.match(/slide(\d+)\.xml/)[1], 10);
+      const nb = parseInt(b.match(/slide(\d+)\.xml/)[1], 10);
+      return na - nb;
+    });
+
+  const out = [];
+
+  for (let i = 0; i < slideFiles.length; i++){
+    const slidePath = slideFiles[i];
+    const slideNum = i + 1;
+    const xmlText = await zip.file(slidePath).async('text');
+    const xml = parser.parseFromString(xmlText, 'application/xml');
+
+    // map relationship IDs -> media file paths (for images)
+    const slideFileName = slidePath.split('/').pop();
+    const relsPath = `ppt/slides/_rels/${slideFileName}.rels`;
+    const relMap = {};
+    if (zip.file(relsPath)) {
+      const relsText = await zip.file(relsPath).async('text');
+      const relsXml = parser.parseFromString(relsText, 'application/xml');
+      Array.from(relsXml.getElementsByTagName('Relationship')).forEach(rel => {
+        relMap[rel.getAttribute('Id')] = rel.getAttribute('Target');
+      });
+    }
+
+    let title = null;
+    const bullets = [];
+    Array.from(xml.getElementsByTagName('p:sp')).forEach(shape => {
+      const phEls = shape.getElementsByTagName('p:ph');
+      const phType = phEls.length ? phEls[0].getAttribute('type') : null;
+      const isTitle = phType === 'title' || phType === 'ctrTitle';
+      const text = Array.from(shape.getElementsByTagName('a:t')).map(t => t.textContent).join('');
+      if (!text.trim()) return;
+      if (isTitle && !title) title = text;
+      else bullets.push(text);
+    });
+
+    const images = [];
+    Array.from(xml.getElementsByTagName('p:pic')).forEach(pic => {
+      const blips = pic.getElementsByTagName('a:blip');
+      if (!blips.length) return;
+      const embedId = blips[0].getAttribute('r:embed');
+      if (!embedId || !relMap[embedId]) return;
+      let target = relMap[embedId].replace(/^\.\.\//, 'ppt/');
+      if (!target.startsWith('ppt/')) target = 'ppt/slides/' + target;
+      const imgFile = zip.file(target);
+      if (!imgFile) return;
+      images.push({ file: imgFile, ext: target.split('.').pop().toLowerCase() });
+    });
+
+    const parts = [`## Slide ${slideNum}`];
+    if (title) parts.push(`### ${title}`);
+    if (bullets.length) parts.push(bullets.map(b => `- ${b}`).join('\n'));
+    for (let imgIdx = 0; imgIdx < images.length; imgIdx++){
+      const { file: imgFile, ext } = images[imgIdx];
+      const base64 = await imgFile.async('base64');
+      const mime = ext === 'jpg' ? 'jpeg' : ext;
+      parts.push(`![slide ${slideNum} image ${imgIdx + 1}](data:image/${mime};base64,${base64})`);
+    }
+
+    out.push(parts.join('\n\n'));
+  }
+
+  return out.join('\n\n---\n\n');
+}
+
+function render(){
+  queueEl.innerHTML = '';
+  queue.forEach(entry => {
+    const row = document.createElement('div');
+    row.className = 'row ' + entry.status;
+    const label = entry.status === 'pending' ? 'queued'
+      : entry.status === 'busy' ? 'converting…'
+      : entry.status === 'done' ? 'ready'
+      : 'failed';
+    row.innerHTML = `<div class="dot"></div><div class="name">${entry.file.name}</div><div class="status">${label}</div>`;
+    queueEl.appendChild(row);
+  });
+  actionsEl.style.display = queue.length ? 'flex' : 'none';
+  downloadAllBtn.disabled = !queue.some(e => e.status === 'done');
+}
+
+downloadAllBtn.addEventListener('click', async () => {
+  const ready = queue.filter(e => e.status === 'done');
+  for (const entry of ready){
+    downloadBlob(entry.mdBlob, entry.mdName);
+    await new Promise(r => setTimeout(r, 200)); // avoid browser blocking rapid multi-downloads
+  }
+});
+
+clearBtn.addEventListener('click', () => {
+  queue = [];
+  inputEl.value = '';
+  render();
+});
+
+function downloadBlob(blob, name){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+</script>
+</body>
+</html>
